@@ -1,0 +1,57 @@
+<!doctype html>
+<!-- Dev preview: runs scriptable/Dead Ahead.js drawWallpaper() against a canvas mock of Scriptable's DrawContext. -->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;background:#000}
+  #phone{position:relative;width:390px;height:844px;overflow:hidden}
+  canvas{width:390px;height:844px;display:block}
+  .clock{position:absolute;top:58px;width:100%;text-align:center;color:#fff;font-family:-apple-system,system-ui;text-shadow:0 1px 6px rgba(0,0,0,.3)}
+  .clock .d{font-size:19px;font-weight:600;opacity:.9}
+  .clock .t{font-size:92px;font-weight:700;line-height:1;letter-spacing:-2px}
+  .widgets{position:absolute;top:226px;left:50%;transform:translateX(-50%);width:330px;height:62px;border-radius:16px;background:rgba(255,255,255,.14);color:#fff;font:600 13px -apple-system,system-ui;padding:8px 12px;box-sizing:border-box;line-height:1.35}
+  .widgets span{font-weight:400;display:block;font-size:12px}
+  .btn{position:absolute;bottom:52px;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.18)}
+</style></head><body>
+<div id="phone"><canvas id="c"></canvas>
+  <div class="clock"><div class="d">Tuesday, November 10</div><div class="t">9:41</div></div>
+  <div class="widgets" id="lockwidget"></div>
+  <div class="btn" style="left:46px"></div><div class="btn" style="right:46px"></div>
+</div>
+<script>
+// ---- minimal Scriptable API mock ----
+class Size { constructor(w,h){ this.width=w; this.height=h; } }
+class Rect { constructor(x,y,w,h){ Object.assign(this,{x,y,width:w,height:h}); } }
+class Color { constructor(h,a=1){ const n=parseInt(h.slice(1),16); this.css=`rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; } static white(){ return new Color("#ffffff"); } }
+const Font = new Proxy({}, { get:(_,k)=>(size)=>({size, weight: /heavy/i.test(k)?900:/bold/i.test(k)?700:/medium/i.test(k)?500:400}) });
+class Path { constructor(){ this.ops=[]; } addRoundedRect(r,cw){ this.ops.push([r,cw]); } }
+class DrawContext {
+  set size(s){ const c=document.getElementById("c"); c.width=s.width; c.height=s.height; this.g=c.getContext("2d"); this.c=c; }
+  setFillColor(c){ this.fill=c.css; } setTextColor(c){ this.tc=c.css; }
+  setFont(f){ this.font=f; } setTextAlignedLeft(){ this.al="left"; } setTextAlignedRight(){ this.al="right"; } setTextAlignedCenter(){ this.al="center"; }
+  fillRect(r){ this.g.fillStyle=this.fill; this.g.fillRect(r.x,r.y,r.width,r.height); }
+  fillEllipse(r){ const g=this.g; g.fillStyle=this.fill; g.beginPath(); g.ellipse(r.x+r.width/2,r.y+r.height/2,r.width/2,r.height/2,0,0,7); g.fill(); }
+  addPath(p){ this.path=p; }
+  fillPath(){ const g=this.g; g.fillStyle=this.fill; for(const [r,rad] of this.path.ops){ g.beginPath(); g.roundRect(r.x,r.y,r.width,r.height,rad); g.fill(); } }
+  drawTextInRect(t,r){ const g=this.g; g.save(); g.beginPath(); g.rect(r.x,r.y,r.width,r.height); g.clip();
+    g.font=`${this.font.weight} ${this.font.size}px -apple-system, system-ui`; g.fillStyle=this.tc; g.textBaseline="top"; g.textAlign=this.al||"left";
+    const x = this.al==="right" ? r.x+r.width : this.al==="center" ? r.x+r.width/2 : r.x; g.fillText(t,x,r.y+1); g.restore(); }
+  drawImageInRect(){} getImage(){ return this.c; }
+}
+window.__DEAD_AHEAD_PREVIEW__ = true;
+</script>
+<script type="module">
+const src = await (await fetch("../scriptable/Dead Ahead.js")).text();
+const mod = await import(URL.createObjectURL(new Blob([src + "\nexport { drawWallpaper, pickUrgent, countdown, dayName, code };"], {type:"text/javascript"})));
+const blob = await (await fetch("../site/feed.enc.json")).json();
+const b64=(s)=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)), enc=new TextEncoder();
+const base=await crypto.subtle.importKey("raw",enc.encode("demo-passcode"),"PBKDF2",false,["deriveKey"]);
+const key=await crypto.subtle.deriveKey({name:"PBKDF2",hash:"SHA-256",salt:b64(blob.salt),iterations:blob.iter},base,{name:"AES-GCM",length:256},false,["decrypt"]);
+const feed=JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:b64(blob.iv),additionalData:enc.encode("dead-ahead:v1")},key,b64(blob.ct))));
+mod.drawWallpaper(feed, 1179, 2556, null);
+// lock-screen rectangular widget text, same logic as buildWidget()
+const now=new Date(), urgent=mod.pickUrgent(feed,now), next=urgent.find(i=>i._d>=now)||urgent[0];
+const late=urgent.filter(i=>i._d<now), up=urgent.filter(i=>i._d>=now);
+document.getElementById("lockwidget").innerHTML = `▲ ${up.length} due${late.length?` · ${late.length} late`:""} · next ${mod.countdown(next._d,now)}` +
+  [...up,...late].slice(0,2).map(i=>`<span>${i._d<now?"⚠︎ ":mod.dayName(i._d,now)+" "}${mod.code(feed,i)} ${i.title}</span>`).join("");
+document.body.dataset.ready = "1";
+</script></body></html>

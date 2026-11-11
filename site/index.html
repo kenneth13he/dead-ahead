@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dead Ahead</title>
+<meta name="description" content="Your deadlines, straight ahead.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dead Ahead">
+<meta name="theme-color" content="#0B1020" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F4F5F8" media="(prefers-color-scheme: light)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="lock" class="lock" hidden>
+  <img src="icons/icon-192.png" alt="" class="lock-icon">
+  <h1>Dead Ahead</h1>
+  <p class="muted">Your deadlines, straight ahead.</p>
+  <form id="lock-form" autocomplete="off">
+    <input id="passcode" type="password" placeholder="Passcode" autocomplete="current-password" required>
+    <label class="remember"><input id="remember" type="checkbox" checked> Remember on this device</label>
+    <button type="submit" id="unlock-btn">Unlock</button>
+    <p id="lock-error" class="error" role="alert"></p>
+  </form>
+</main>
+
+<main id="app" class="app" hidden>
+  <header class="top">
+    <div>
+      <h1 class="brand">Dead Ahead</h1>
+      <p id="updated" class="muted small"></p>
+    </div>
+    <button id="refresh" class="icon-btn" aria-label="Refresh">↻</button>
+  </header>
+
+  <section id="next" class="next"></section>
+  <section id="stats" class="stats"></section>
+
+  <nav class="chips" role="tablist">
+    <button class="chip active" data-filter="todo">To do</button>
+    <button class="chip" data-filter="tests">Tests</button>
+    <button class="chip" data-filter="all">Everything</button>
+  </nav>
+
+  <section id="timeline" class="timeline"></section>
+
+  <footer class="foot muted small">
+    <span id="school"></span> · <button id="lock-now" class="link">Lock</button>
+  </footer>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# secrets & personal data: never commit
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+syllabus/raw/
+syllabus/syllabus.json
+site/feed.enc.json
+site/_preview.html

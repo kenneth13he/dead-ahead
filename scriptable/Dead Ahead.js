@@ -1,0 +1,376 @@
+// Variables used by Scriptable.
+// These must be at the very top of the file. Do not edit.
+// icon-color: red; icon-glyph: location-arrow;
+
+/*
+ * Dead Ahead for Scriptable: lock-screen widget + daily wallpaper.
+ *
+ *  • Run it once in Scriptable  → set up (site URL + passcode, saved in your iPhone Keychain).
+ *  • Add as a lock-screen widget → urgent work: assignments, quizzes, discussions due soon.
+ *  • Run from Shortcuts          → returns a wallpaper image of your whole week (tests included).
+ *
+ * Setup guide: see SETUP-IPHONE.md in the repo.
+ */
+
+const VERSION = 1;
+const KC_URL = "deadahead.site";
+const KC_PASS = "deadahead.passcode";
+const URGENT_DAYS = 7;          // widget looks this far ahead
+const WALL_DAYS = 7;            // wallpaper shows this many days
+const BG_FILE = "dead-ahead-background.jpg"; // optional photo in Scriptable's folder
+
+const COLORS = {
+  bgTop: "#141C38", bgBot: "#080B18", ink: "#EEF1F8", muted: "#8C94AB",
+  coral: "#FF5A4E", test: "#A78BFA", warn: "#FF922B", line: "#232B42",
+};
+const URGENT_KINDS = new Set(["assignment", "quiz", "discussion", "peer review", "todo", "deadline"]);
+const DAY = 864e5;
+
+/* ------------------------------------------------------------ data picking (pure) */
+
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const dayDiff = (a, b) => Math.round((startOfDay(a) - startOfDay(b)) / DAY);
+
+function openItems(feed) {
+  return feed.items.filter((i) => !i.done).map((i) => ({ ...i, _d: new Date(i.due) }));
+}
+
+/** Widget: unfinished work (not events) that's overdue or due within URGENT_DAYS. */
+function pickUrgent(feed, now = new Date()) {
+  const until = new Date(now.getTime() + URGENT_DAYS * DAY);
+  return openItems(feed)
+    .filter((i) => (URGENT_KINDS.has(i.kind) || i.test) && i._d <= until && now - i._d < 3 * DAY)
+    .sort((a, b) => a._d - b._d);
+}
+
+/** Wallpaper: everything (tests, events, syllabus dates) for the next WALL_DAYS, plus overdue. */
+function pickWeek(feed, now = new Date()) {
+  const end = new Date(startOfDay(now).getTime() + WALL_DAYS * DAY);
+  const items = openItems(feed).filter((i) => i._d < end && now - i._d < 3 * DAY);
+  const overdue = items.filter((i) => i._d < now && i.source !== "syllabus" && i.kind !== "event");
+  const upcoming = items.filter((i) => i._d >= startOfDay(now) && !overdue.includes(i));
+  const days = [];
+  for (let k = 0; k < WALL_DAYS; k++) {
+    const day = new Date(startOfDay(now).getTime() + k * DAY);
+    const list = upcoming.filter((i) => dayDiff(i._d, day) === 0).sort((a, b) => a._d - b._d);
+    if (list.length) days.push({ day, items: list });
+  }
+  return { overdue, days, total: upcoming.length, tests: upcoming.filter((i) => i.test).length };
+}
+
+function fmtTime(d, allDay) {
+  if (allDay) return "all day";
+  let h = d.getHours(); const m = d.getMinutes();
+  const ap = h >= 12 ? "p" : "a"; h = h % 12 || 12;
+  return m ? `${h}:${String(m).padStart(2, "0")}${ap}` : `${h}${ap}`;
+}
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function dayName(d, now) {
+  const k = dayDiff(d, now);
+  return k === 0 ? "Today" : k === 1 ? "Tmrw" : DOW[d.getDay()];
+}
+function countdown(d, now) {
+  const ms = d - now;
+  if (ms < 0) return "overdue";
+  const h = ms / 36e5;
+  if (h < 1) return `${Math.max(1, Math.round(ms / 6e4))}m`;
+  if (h < 24) return `${Math.round(h)}h`;
+  return `${dayDiff(d, now)}d`;
+}
+const code = (feed, i) => (feed.courses[i.course] || {}).code || "";
+const color = (feed, i) => (feed.courses[i.course] || {}).color || COLORS.muted;
+const clip = (s, n) => (s.length > n ? s.slice(0, Math.max(1, n - 1)).trimEnd() + "…" : s);
+
+/* ------------------------------------------------------------ wallpaper (DrawContext only) */
+
+function drawWallpaper(feed, W, H, bgImage, now = new Date()) {
+  const ctx = new DrawContext();
+  ctx.size = new Size(W, H);
+  ctx.opaque = true;
+  ctx.respectScreenScale = false;
+  const u = W / 390; // design in iPhone points, scale to pixels
+
+  // Background: photo (dimmed) or navy gradient
+  if (bgImage) {
+    const s = Math.max(W / bgImage.size.width, H / bgImage.size.height);
+    const bw = bgImage.size.width * s, bh = bgImage.size.height * s;
+    ctx.drawImageInRect(bgImage, new Rect((W - bw) / 2, (H - bh) / 2, bw, bh));
+  } else {
+    const steps = 48;
+    const a = hex(COLORS.bgTop), b = hex(COLORS.bgBot);
+    for (let k = 0; k < steps; k++) {
+      const t = k / (steps - 1);
+      ctx.setFillColor(new Color(rgbHex(a.map((v, j) => v + (b[j] - v) * t))));
+      ctx.fillRect(new Rect(0, (H * k) / steps, W, H / steps + 1));
+    }
+  }
+
+  const week = pickWeek(feed, now);
+  const x0 = 24 * u, x1 = W - 24 * u;
+  const top = H * 0.385;          // below clock + lock-screen widget row
+  const bottom = H - 120 * u;      // above flashlight / camera buttons
+
+  // Panel behind the list for legibility on photos
+  const panel = new Path();
+  panel.addRoundedRect(new Rect(x0 - 12 * u, top - 14 * u, x1 - x0 + 24 * u, bottom - top + 14 * u), 22 * u, 22 * u);
+  ctx.addPath(panel);
+  ctx.setFillColor(new Color("#05070F", bgImage ? 0.62 : 0.35));
+  ctx.fillPath();
+
+  let y = top;
+  const text = (s, x, yy, w, size, col, bold, align = "left") => {
+    ctx.setFont(bold ? Font.boldSystemFont(size * u) : Font.systemFont(size * u));
+    ctx.setTextColor(new Color(col));
+    if (align === "right") ctx.setTextAlignedRight(); else ctx.setTextAlignedLeft();
+    ctx.drawTextInRect(s, new Rect(x, yy, w, size * u * 1.35));
+  };
+
+  // Header
+  const head = week.total ? `${week.total} due this week${week.tests ? ` · ${week.tests} test${week.tests > 1 ? "s" : ""}` : ""}` : "Nothing due this week 🌊";
+  text("▲ DEAD AHEAD", x0, y, 200 * u, 11, COLORS.coral, true);
+  text(head, x0, y + 16 * u, x1 - x0, 17, COLORS.ink, true);
+  y += 48 * u;
+
+  const ROW = 30 * u, DAYH = 22 * u;
+  const rows = [];
+  if (week.overdue.length) rows.push({ type: "day", label: "Overdue", warn: true }, ...week.overdue.map((i) => ({ type: "item", i, over: true })));
+  for (const d of week.days) rows.push({ type: "day", label: `${dayName(d.day, now)} ${d.day.getDate()}` }, ...d.items.map((i) => ({ type: "item", i })));
+
+  const room = Math.floor((bottom - y - 20 * u) / ROW);
+  let shown = 0, used = 0;
+  for (const r of rows) {
+    const h = r.type === "day" ? DAYH + 6 * u : ROW;
+    if (y + h > bottom - 24 * u) break;
+    if (r.type === "day") {
+      y += 6 * u;
+      text(r.label.toUpperCase(), x0, y, 200 * u, 11, r.warn ? COLORS.coral : COLORS.muted, true);
+      y += DAYH;
+      continue;
+    }
+    const i = r.i;
+    // course colour dot
+    ctx.setFillColor(new Color(color(feed, i)));
+    ctx.fillEllipse(new Rect(x0, y + 6 * u, 9 * u, 9 * u));
+    const c = code(feed, i);
+    text(c, x0 + 16 * u, y + 1 * u, 62 * u, 13, color(feed, i), true);
+    // TEST pill
+    let tx = x0 + 80 * u;
+    if (i.test) {
+      const pill = new Path();
+      pill.addRoundedRect(new Rect(tx, y + 2 * u, 34 * u, 16 * u), 5 * u, 5 * u);
+      ctx.addPath(pill); ctx.setFillColor(new Color(COLORS.test)); ctx.fillPath();
+      ctx.setTextAlignedCenter();
+      ctx.setFont(Font.heavySystemFont(9 * u)); ctx.setTextColor(Color.white());
+      ctx.drawTextInRect("TEST", new Rect(tx, y + 4.5 * u, 34 * u, 14 * u));
+      tx += 40 * u;
+    }
+    const timeW = 58 * u;
+    const titleW = x1 - timeW - tx - 6 * u;
+    const title = clip(i.title + (i.source === "syllabus" ? " 📄" : ""), Math.floor(titleW / (15 * u * 0.53)));
+    text(title, tx, y, titleW, 15, r.over ? COLORS.coral : COLORS.ink, i.test || r.over);
+    text(r.over ? "late" : fmtTime(i._d, i.all_day), x1 - timeW, y + 1 * u, timeW, 13, r.over ? COLORS.coral : COLORS.muted, false, "right");
+    y += ROW;
+    shown++;
+  }
+  const totalItems = rows.filter((r) => r.type === "item").length;
+  if (shown < totalItems) text(`+${totalItems - shown} more in the app`, x0, y + 4 * u, 300 * u, 12, COLORS.muted, false);
+
+  const stamp = `updated ${new Date(feed.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  text(stamp, x0, bottom - 18 * u, x1 - x0, 10, COLORS.muted, false, "right");
+  return ctx.getImage();
+}
+
+function hex(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function rgbHex(a) { return "#" + a.map((v) => Math.round(v).toString(16).padStart(2, "0")).join(""); }
+
+/* ------------------------------------------------------------ widget (lock + home screen) */
+
+function buildWidget(feed, family, siteUrl, now = new Date()) {
+  const w = new ListWidget();
+  w.url = siteUrl;
+  w.refreshAfterDate = new Date(Date.now() + 30 * 60e3);
+  const urgent = feed ? pickUrgent(feed, now) : [];
+  const next = urgent.find((i) => i._d >= now) || urgent[0];
+  const soon = urgent.filter((i) => i._d - now < 3 * DAY).length;
+
+  if (!feed) {
+    const t = w.addText("Dead Ahead: open Scriptable to set up");
+    t.font = Font.systemFont(12);
+    return w;
+  }
+
+  if (family === "accessoryInline") {
+    w.addText(next ? `▲ ${code(feed, next)} ${clip(next.title, 18)} · ${countdown(next._d, now)}` : "▲ All clear");
+    return w;
+  }
+
+  if (family === "accessoryCircular") {
+    w.addAccessoryWidgetBackground = true;
+    const s = w.addStack(); s.layoutVertically(); s.centerAlignContent();
+    const n = s.addText(String(soon)); n.font = Font.boldRoundedSystemFont(22); n.centerAlignText();
+    const l = s.addText("due"); l.font = Font.systemFont(10); l.centerAlignText();
+    return w;
+  }
+
+  if (family === "accessoryRectangular") {
+    const late = urgent.filter((i) => i._d < now);
+    const upcoming = urgent.filter((i) => i._d >= now);
+    const head = w.addText(urgent.length
+      ? `▲ ${upcoming.length} due${late.length ? ` · ${late.length} late` : ""}${next && next._d >= now ? ` · next ${countdown(next._d, now)}` : ""}`
+      : "▲ All clear 🌊");
+    head.font = Font.boldSystemFont(13);
+    for (const i of [...upcoming, ...late].slice(0, 2)) {
+      const late = i._d < now;
+      const t = w.addText(`${late ? "⚠︎ " : dayName(i._d, now) + " "}${code(feed, i)} ${i.title}`);
+      t.font = Font.systemFont(12);
+      t.lineLimit = 1;
+    }
+    return w;
+  }
+
+  // Home-screen sizes
+  w.backgroundColor = new Color(COLORS.bgBot);
+  const max = family === "large" ? 9 : family === "medium" ? 4 : 3;
+  const h = w.addText(`▲ ${urgent.length} due soon`);
+  h.font = Font.boldSystemFont(13); h.textColor = new Color(COLORS.coral);
+  w.addSpacer(6);
+  if (!urgent.length) { const t = w.addText("All clear 🌊"); t.textColor = new Color(COLORS.ink); }
+  for (const i of urgent.slice(0, max)) {
+    const row = w.addStack(); row.centerAlignContent(); row.spacing = 6;
+    const c = row.addText(code(feed, i)); c.font = Font.boldSystemFont(11); c.textColor = new Color(color(feed, i));
+    const t = row.addText(i.title); t.font = Font.systemFont(12); t.textColor = new Color(COLORS.ink); t.lineLimit = 1;
+    row.addSpacer();
+    const d = row.addText(countdown(i._d, now)); d.font = Font.mediumSystemFont(11);
+    d.textColor = new Color(i._d < now ? COLORS.coral : i._d - now < 2 * DAY ? COLORS.warn : COLORS.muted);
+    w.addSpacer(4);
+  }
+  w.addSpacer();
+  const u = w.addText(`updated ${new Date(feed.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
+  u.font = Font.systemFont(9); u.textColor = new Color(COLORS.muted);
+  return w;
+}
+
+/* ------------------------------------------------------------ Scriptable plumbing */
+
+const fm = () => FileManager.local();
+const cachePath = () => fm().joinPath(fm().documentsDirectory(), "dead-ahead-cache.json");
+
+async function decryptInWebView(blob, pass) {
+  // Uses the iPhone's built-in WebCrypto (same code as the web app).
+  const wv = new WebView();
+  await wv.loadHTML("<html><body></body></html>", "https://dead-ahead.local/");
+  const js = `(async () => {
+    try {
+      const blob = ${JSON.stringify(blob)}, pass = ${JSON.stringify(pass)};
+      const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+      const enc = new TextEncoder();
+      const base = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+      const key = await crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: b64(blob.salt), iterations: blob.iter },
+        base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+      const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(blob.iv), additionalData: enc.encode("dead-ahead:v1") }, key, b64(blob.ct));
+      completion(new TextDecoder().decode(pt));
+    } catch (e) { completion("ERR:" + e.name + ":" + e.message); }
+  })();`;
+  const out = await wv.evaluateJavaScript(js, true);
+  if (typeof out !== "string" || out.startsWith("ERR:")) {
+    throw new Error(String(out).includes("OperationError") ? "Wrong passcode" : `Decrypt failed: ${out}`);
+  }
+  return JSON.parse(out);
+}
+
+async function getFeed() {
+  if (!Keychain.contains(KC_URL) || !Keychain.contains(KC_PASS)) return null;
+  const site = Keychain.get(KC_URL);
+  try {
+    const req = new Request(`${site.replace(/\/$/, "")}/feed.enc.json?t=${Date.now()}`);
+    req.timeoutInterval = 20;
+    const feed = await decryptInWebView(await req.loadJSON(), Keychain.get(KC_PASS));
+    fm().writeString(cachePath(), JSON.stringify(feed));
+    return feed;
+  } catch (e) {
+    console.warn(`Using cached copy: ${e.message}`);
+    if (fm().fileExists(cachePath())) return JSON.parse(fm().readString(cachePath()));
+    if (String(e.message).includes("Wrong passcode")) throw e;
+    return null;
+  }
+}
+
+async function setup() {
+  const a = new Alert();
+  a.title = "Dead Ahead setup";
+  a.message = "Paste your Dead Ahead site link and passcode. They're stored in your iPhone Keychain.";
+  a.addTextField("https://you.github.io/dead-ahead", Keychain.contains(KC_URL) ? Keychain.get(KC_URL) : "");
+  a.addSecureTextField("Passcode", "");
+  a.addAction("Save");
+  a.addCancelAction("Cancel");
+  if ((await a.present()) === -1) return false;
+  const site = a.textFieldValue(0).trim(), pass = a.textFieldValue(1);
+  if (!/^https:\/\//.test(site) || pass.length < 8) {
+    const e = new Alert(); e.title = "Check that again"; e.message = "The link must start with https:// and the passcode needs 8+ characters."; e.addAction("OK"); await e.present();
+    return false;
+  }
+  Keychain.set(KC_URL, site); Keychain.set(KC_PASS, pass);
+  try {
+    const feed = await getFeed();
+    const ok = new Alert(); ok.title = "✓ Connected"; ok.message = `${feed.items.length} deadlines loaded.`; ok.addAction("Nice"); await ok.present();
+    return true;
+  } catch (e) {
+    Keychain.remove(KC_PASS);
+    const bad = new Alert(); bad.title = "Couldn't unlock"; bad.message = e.message; bad.addAction("OK"); await bad.present();
+    return false;
+  }
+}
+
+function backgroundImage() {
+  const f = fm(), p = f.joinPath(f.documentsDirectory(), BG_FILE);
+  if (f.fileExists(p)) return Image.fromFile(p);
+  const ic = FileManager.iCloud(), q = ic.joinPath(ic.documentsDirectory(), BG_FILE);
+  if (ic.fileExists(q)) { return Image.fromFile(q); }
+  return null;
+}
+
+function wallpaperSize() {
+  const r = Device.screenResolution();
+  return { W: Math.round(Math.min(r.width, r.height)), H: Math.round(Math.max(r.width, r.height)) };
+}
+
+async function main() {
+  const param = String(args.shortcutParameter || args.widgetParameter || args.queryParameters?.mode || "").toLowerCase();
+
+  if (config.runsInWidget) {
+    const feed = await getFeed().catch(() => null);
+    Script.setWidget(buildWidget(feed, config.widgetFamily, Keychain.contains(KC_URL) ? Keychain.get(KC_URL) : null));
+    return Script.complete();
+  }
+
+  // Run from Shortcuts (or with "wallpaper" parameter) → hand back the wallpaper image
+  if (param.includes("wallpaper") || !config.runsInApp) {
+    const feed = await getFeed();
+    if (!feed) throw new Error("Dead Ahead isn't set up yet. Open the script in Scriptable first.");
+    const { W, H } = wallpaperSize();
+    const img = drawWallpaper(feed, W, H, backgroundImage());
+    Script.setShortcutOutput(img);
+    return Script.complete();
+  }
+
+  // Opened in the Scriptable app: menu
+  const m = new Alert();
+  m.title = "Dead Ahead ▲";
+  m.addAction(Keychain.contains(KC_PASS) ? "Change site / passcode" : "Set up");
+  m.addAction("Preview lock-screen widget");
+  m.addAction("Preview home-screen widget");
+  m.addAction("Preview wallpaper");
+  m.addCancelAction("Close");
+  const pick = await m.present();
+  if (pick === 0) await setup();
+  if (pick === 1 || pick === 2 || pick === 3) {
+    const feed = await getFeed();
+    if (!feed) { await setup(); return Script.complete(); }
+    if (pick === 1) await buildWidget(feed, "accessoryRectangular", Keychain.get(KC_URL)).presentAccessoryRectangular();
+    if (pick === 2) await buildWidget(feed, "medium", Keychain.get(KC_URL)).presentMedium();
+    if (pick === 3) { const { W, H } = wallpaperSize(); QuickLook.present(drawWallpaper(feed, W, H, backgroundImage()), true); }
+  }
+  Script.complete();
+}
+
+if (typeof __DEAD_AHEAD_PREVIEW__ === "undefined") await main();
