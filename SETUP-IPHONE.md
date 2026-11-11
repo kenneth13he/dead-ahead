@@ -32,9 +32,11 @@ through the day (iOS decides exactly when, usually every 15–60 min).
 **Make the shortcut**
 1. Open **Shortcuts** → **+** → name it **Dead Ahead Wallpaper**.
 2. Add action **Run Script** (Scriptable) → Script: **Dead Ahead** → tap *Parameter* and type `wallpaper`.
-3. Add action **Set Wallpaper Photo** → set it to **Lock Screen**. Tap the arrow and turn **off** *Show Preview*
+3. Add action **Base64 Encode**, tap *Encode* and change it to **Decode**. (Scriptable hands the picture over as
+   text; this turns it back into an image.)
+4. Add action **Set Wallpaper Photo** → set it to **Lock Screen**. Tap the arrow and turn **off** *Show Preview*
    and *Crop to Subject*.
-4. Tap ▶︎ once to test. Your lock screen should now show your week.
+5. Tap ▶︎ once to test. Your lock screen should now show your week.
 
 **Run it every morning**
 1. Shortcuts → **Automation** → **+** → **Time of Day** → `6:00 AM`, **Daily**.

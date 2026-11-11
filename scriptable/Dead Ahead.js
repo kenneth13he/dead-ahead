@@ -366,7 +366,9 @@ async function main() {
     if (!feed) throw new Error("Dead Ahead isn't set up yet. Open the script in Scriptable first.");
     const { W, H } = wallpaperSize();
     const img = drawWallpaper(feed, W, H, backgroundImage());
-    Script.setShortcutOutput(img);
+    // Shortcuts can't receive an Image from Scriptable, so hand back base64 text.
+    // The shortcut turns it back into a picture with "Decode Base64" before "Set Wallpaper Photo".
+    Script.setShortcutOutput(Data.fromPNG(img).toBase64String());
     return Script.complete();
   }
 
