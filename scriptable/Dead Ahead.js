@@ -16,7 +16,6 @@ const VERSION = 1;
 const KC_URL = "deadahead.site";
 const KC_PASS = "deadahead.passcode";
 const URGENT_DAYS = 7;          // widget looks this far ahead
-const WALL_DAYS = 7;            // wallpaper shows this many days
 const BG_FILE = "dead-ahead-background.jpg"; // optional photo in Scriptable's folder
 
 const COLORS = {
@@ -52,19 +51,23 @@ function pickToday(feed, now = new Date()) {
     .sort((a, b) => a._d - b._d);
 }
 
-/** Wallpaper: everything (tests, events, syllabus dates) for the next WALL_DAYS, plus overdue. */
+/** Wallpaper: everything (tests, events, syllabus dates) from now until the end of the school week. Never overdue.
+ *  Sun–Fri: through Friday night. From Saturday on, the next week loads in (rest of the weekend + Mon–Fri). */
+function weekEnd(now = new Date()) {
+  const toSat = (6 - now.getDay() + 7) % 7 || 7; // days until the next Saturday 00:00 (a Saturday counts as next week)
+  return new Date(startOfDay(now).getTime() + toSat * DAY);
+}
 function pickWeek(feed, now = new Date()) {
-  const end = new Date(startOfDay(now).getTime() + WALL_DAYS * DAY);
-  const items = openItems(feed, now).filter((i) => i._d < end);
-  const overdue = items.filter((i) => i._d < now);
-  const upcoming = items.filter((i) => i._d >= now);
+  const end = weekEnd(now);
+  const upcoming = feed.items.map((i) => ({ ...i, _d: new Date(i.due) }))
+    .filter((i) => !i.done && i._d >= now && i._d < end);
   const days = [];
-  for (let k = 0; k < WALL_DAYS; k++) {
-    const day = new Date(startOfDay(now).getTime() + k * DAY);
+  for (let day = startOfDay(now); day < end; day = new Date(day.getTime() + DAY)) {
     const list = upcoming.filter((i) => dayDiff(i._d, day) === 0).sort((a, b) => a._d - b._d);
     if (list.length) days.push({ day, items: list });
   }
-  return { overdue, days, total: upcoming.length, tests: upcoming.filter((i) => i.test).length };
+  const nextWeek = now.getDay() === 6 || now.getDay() === 0;
+  return { overdue: [], days, total: upcoming.length, tests: upcoming.filter((i) => i.test).length, nextWeek };
 }
 
 function fmtTime(d, allDay) {
@@ -135,7 +138,7 @@ function drawWallpaper(feed, W, H, bgImage, now = new Date()) {
   };
 
   // Header
-  const head = week.total ? `${week.total} due this week${week.tests ? ` · ${week.tests} test${week.tests > 1 ? "s" : ""}` : ""}` : "Nothing due this week 🌊";
+  const head = week.total ? `${week.total} due ${week.nextWeek ? "next week" : "this week"}${week.tests ? ` · ${week.tests} test${week.tests > 1 ? "s" : ""}` : ""}` : `Nothing due ${week.nextWeek ? "next week" : "this week"} 🌊`;
   text("▲ DEAD AHEAD", x0, y, 200 * u, 11, COLORS.coral, true);
   text(head, x0, y + 16 * u, x1 - x0, 17, COLORS.ink, true);
   y += 48 * u;
