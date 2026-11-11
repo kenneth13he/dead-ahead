@@ -152,8 +152,19 @@ def lock_syllabus(passcode: str) -> Path:
     return SYLLABUS_LOCKED
 
 
+GENERIC_WORDS = {"quiz", "test", "exam", "final", "assignment", "due", "the", "and", "for", "course",
+                 "deadline", "submission", "submit", "tutorial", "lecture"}
+
+
 def _words(s: str) -> set:
     return {w for w in re.findall(r"[a-z0-9]+", (s or "").lower()) if len(w) > 2 or w.isdigit()}
+
+
+def _same_title(a: str, b: str) -> bool:
+    """Share a distinctive word ("Checkpoint Quiz" != "Comprehension Quiz"); all-generic titles fall back to any word."""
+    wa, wb = _words(a), _words(b)
+    da, db = wa - GENERIC_WORDS, wb - GENERIC_WORDS
+    return bool(da & db) if da and db else bool(wa & wb)
 
 
 def merge_syllabus(items: list, syllabus: list, courses: dict, start: datetime, end: datetime) -> list:
@@ -173,8 +184,7 @@ def merge_syllabus(items: list, syllabus: list, courses: dict, start: datetime, 
             if q["course"] != course:
                 continue
             close = abs(parse_dt(q["due"]) - due) <= timedelta(days=1)
-            overlap = _words(q["title"]) & _words(s["title"])
-            if close and overlap:
+            if close and _same_title(q["title"], s["title"]):
                 dup = True
                 break
         if dup:

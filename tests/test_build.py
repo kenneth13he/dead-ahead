@@ -91,5 +91,14 @@ class SyllabusMergeTest(unittest.TestCase):
         self.assertIsNotNone(build.parse_dt("2026-11-19T09:00:00-05:00"))
 
 
+
+class SameTitleTests(unittest.TestCase):
+    def test_generic_word_alone_is_not_a_match(self):
+        from deadahead.build import _same_title
+        self.assertFalse(_same_title("Week 9 Comprehension Quiz", "Checkpoint Quiz"))
+        self.assertTrue(_same_title("Assignment 4: Proofs", "Assignment 4"))
+        self.assertTrue(_same_title("Final Exam", "Final Exam"))
+
+
 if __name__ == "__main__":
     unittest.main()
