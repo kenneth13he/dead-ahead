@@ -271,10 +271,17 @@ async function decryptInWebView(blob, pass, pageUrl) {
       const key = await crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: b64(blob.salt), iterations: blob.iter },
         base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
       const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(blob.iv), additionalData: enc.encode("dead-ahead:v1") }, key, b64(blob.ct));
-      completion(new TextDecoder().decode(pt));
-    } catch (e) { completion("ERR:" + e.name + ":" + e.message); }
-  })();`;
-  const out = await wv.evaluateJavaScript(js, true);
+      window.__deadAhead = new TextDecoder().decode(pt);
+    } catch (e) { window.__deadAhead = "ERR:" + e.name + ":" + e.message; }
+  })(); "started";`;
+  // Start the async work, then poll for the answer (evaluateJavaScript can't return a Promise).
+  await wv.evaluateJavaScript(js, false);
+  let out = "";
+  for (let i = 0; i < 150 && !out; i++) {
+    await new Promise((r) => Timer.schedule(200, false, r));
+    out = await wv.evaluateJavaScript(`window.__deadAhead || ""`, false);
+  }
+  if (!out) throw new Error("Unlocking took too long. Try again.");
   if (typeof out !== "string" || out.startsWith("ERR:")) {
     throw new Error(String(out).includes("OperationError") ? "Wrong passcode" : `Decrypt failed: ${out}`);
   }
