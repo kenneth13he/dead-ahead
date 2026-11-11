@@ -17,13 +17,13 @@ You need: your app link (`https://<you>.github.io/<repo>/`) and your passcode.
    You should see **✓ Connected**.
    *(Try **Preview wallpaper** and **Preview lock-screen widget** from the same menu.)*
 
-## 3. Lock-screen widget: urgent work
+## 3. Lock-screen widget: what's due today
 1. Lock your phone, then press and hold the lock screen → **Customize** → **Lock Screen**.
 2. Tap the widget area under the clock → find **Scriptable** → pick the **wide rectangle** → tap **Done**.
 3. Tap the new widget → **Script: Dead Ahead**.
 4. Tap ✕, then **Done**.
 
-It shows how many things are due in the next 7 days, how many are late, and the next two items. It refreshes itself
+It shows what's still due **today** (time, course, title), or *Nothing due today*. Overdue work isn't shown. It refreshes itself
 through the day (iOS decides exactly when, usually every 15–60 min).
 
 > Tip: there's also a home-screen widget (small/medium/large). Add a Scriptable widget, then pick **Dead Ahead**.

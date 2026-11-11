@@ -6,7 +6,7 @@
  * Dead Ahead for Scriptable: lock-screen widget + daily wallpaper.
  *
  *  • Run it once in Scriptable  → set up (site URL + passcode, saved in your iPhone Keychain).
- *  • Add as a lock-screen widget → urgent work: assignments, quizzes, discussions due soon.
+ *  • Add as a lock-screen widget → what's still due today (or "Nothing due today").
  *  • Run from Shortcuts          → returns a wallpaper image of your whole week (tests included).
  *
  * Setup guide: see SETUP-IPHONE.md in the repo.
@@ -41,6 +41,14 @@ function pickUrgent(feed, now = new Date()) {
   const until = new Date(startOfDay(now).getTime() + URGENT_DAYS * DAY);
   return openItems(feed, now)
     .filter((i) => (URGENT_KINDS.has(i.kind) || i.test) && i._d < until)
+    .sort((a, b) => a._d - b._d);
+}
+
+/** Lock-screen widget: only what's still ahead today (nothing overdue). */
+function pickToday(feed, now = new Date()) {
+  const end = new Date(startOfDay(now).getTime() + DAY);
+  return feed.items.map((i) => ({ ...i, _d: new Date(i.due) }))
+    .filter((i) => !i.done && i._d >= now && i._d < end)
     .sort((a, b) => a._d - b._d);
 }
 
@@ -191,8 +199,6 @@ function buildWidget(feed, family, siteUrl, now = new Date()) {
   w.url = siteUrl;
   w.refreshAfterDate = new Date(Date.now() + 30 * 60e3);
   const urgent = feed ? pickUrgent(feed, now) : [];
-  const next = urgent.find((i) => i._d >= now) || urgent[0];
-  const soon = urgent.filter((i) => i._d - now < 3 * DAY).length;
 
   if (!feed) {
     const t = w.addText("Dead Ahead: open Scriptable to set up");
@@ -200,32 +206,37 @@ function buildWidget(feed, family, siteUrl, now = new Date()) {
     return w;
   }
 
+  // Lock screen: just today, from now on. Never overdue.
+  const today = pickToday(feed, now);
+  const none = "Nothing due today";
+
   if (family === "accessoryInline") {
-    w.addText(next ? `▲ ${code(feed, next)} ${clip(next.title, 18)} · ${countdown(next._d, now)}` : "▲ All clear");
+    const n = today[0];
+    w.addText(n ? `▲ ${code(feed, n)} ${clip(n.title, 16)} ${fmtTime(n._d, n.all_day)}${today.length > 1 ? ` +${today.length - 1}` : ""}` : none);
     return w;
   }
 
   if (family === "accessoryCircular") {
     w.addAccessoryWidgetBackground = true;
-    const s = w.addStack(); s.layoutVertically(); s.centerAlignContent();
-    const n = s.addText(String(soon)); n.font = Font.boldRoundedSystemFont(22); n.centerAlignText();
-    const l = s.addText("due"); l.font = Font.systemFont(10); l.centerAlignText();
+    const st = w.addStack(); st.layoutVertically(); st.centerAlignContent();
+    const n = st.addText(String(today.length)); n.font = Font.boldRoundedSystemFont(22); n.centerAlignText();
+    const l = st.addText("today"); l.font = Font.systemFont(9); l.centerAlignText();
     return w;
   }
 
   if (family === "accessoryRectangular") {
-    const late = urgent.filter((i) => i._d < now);
-    const upcoming = urgent.filter((i) => i._d >= now);
-    const head = w.addText(urgent.length
-      ? `▲ ${upcoming.length} due${late.length ? ` · ${late.length} late` : ""}${next && next._d >= now ? ` · next ${countdown(next._d, now)}` : ""}`
-      : "▲ All clear 🌊");
-    head.font = Font.boldSystemFont(13);
-    for (const i of [...upcoming, ...late].slice(0, 2)) {
-      const late = i._d < now;
-      const t = w.addText(`${late ? "⚠︎ " : dayName(i._d, now) + " "}${code(feed, i)} ${i.title}`);
-      t.font = Font.systemFont(12);
-      t.lineLimit = 1;
+    if (!today.length) {
+      const t = w.addText(none); t.font = Font.boldSystemFont(14); t.minimumScaleFactor = 0.7; t.lineLimit = 1;
+      return w;
     }
+    const head = w.addText(`▲ ${today.length} due today`);
+    head.font = Font.boldSystemFont(13); head.lineLimit = 1; head.minimumScaleFactor = 0.7;
+    const shown = today.slice(0, 2);
+    shown.forEach((i, k) => {
+      const more = k === shown.length - 1 && today.length > 2 ? ` +${today.length - 2}` : "";
+      const t = w.addText(`${fmtTime(i._d, i.all_day)} ${code(feed, i)} ${i.title}${more}`);
+      t.font = Font.systemFont(12); t.lineLimit = 1; t.minimumScaleFactor = 0.75;
+    });
     return w;
   }
 
