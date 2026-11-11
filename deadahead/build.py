@@ -11,7 +11,11 @@ FEED_VERSION = 1
 SYLLABUS_PLAIN = config.REPO_ROOT / "syllabus" / "syllabus.json"   # gitignored, you + Claude edit this
 SYLLABUS_LOCKED = config.REPO_ROOT / "syllabus" / "syllabus.enc"   # committed, encrypted copy
 
-TEST_WORDS = re.compile(r"\b(mid-?terms?|exams?|tests?|quiz(zes)?|final|term test|tt\d)\b", re.I)
+# Real tests only. Weekly quizzes are still deadlines, just not tagged TEST.
+TEST_WORDS = re.compile(r"\b(mid-?terms?|exams?|tests?|finals?|term tests?|tt\d)\b", re.I)
+NOT_TEST_WORDS = re.compile(r"\b(remarks?|regrades?|conflict|survey|reflection|post-?test|pre-?test|practice|mock|review session|office hours?)\b", re.I)
+# Recurring class events that would drown out real deadlines.
+NOISE_EVENTS = re.compile(r"\b(lectures?|office hours?|tutorials?|TA|practicals?|seminars?|recitations?|lab sections?|LEC\d+|TUT\d+|PRA\d+)\b", re.I)
 KIND_BY_TYPE = {
     "assignment": "assignment", "quiz": "quiz", "discussion_topic": "discussion",
     "calendar_event": "event", "planner_note": "todo", "wiki_page": "reading",
@@ -19,6 +23,19 @@ KIND_BY_TYPE = {
 }
 SKIP_TYPES = {"announcement"}
 PALETTE = ["#4F8EF7", "#F25F5C", "#43AA8B", "#F9A03F", "#9B5DE5", "#00BBF9", "#F15BB5", "#8AC926"]
+
+
+def readable(color: str) -> str:
+    """Brighten very dark Canvas course colours so they read on a dark lock screen."""
+    import colorsys
+    try:
+        r, g, b = (int(color.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    except (ValueError, TypeError):
+        return "#8892A6"
+    h, l, sat = colorsys.rgb_to_hls(r, g, b)
+    if l < 0.58:
+        l, sat = 0.62, max(sat, 0.55)
+    return "#" + "".join(f"{round(v * 255):02X}" for v in colorsys.hls_to_rgb(h, l, sat))
 
 
 def iso(dt: datetime) -> str:
@@ -45,7 +62,14 @@ def short_code(s: str) -> str:
 
 
 def is_test(title: str, kind: str) -> bool:
-    return kind in ("test", "exam") or bool(TEST_WORDS.search(title or ""))
+    if kind in ("test", "exam"):
+        return True
+    return bool(TEST_WORDS.search(title or "")) and not NOT_TEST_WORDS.search(title or "")
+
+
+def is_noise_event(title: str, kind: str) -> bool:
+    """Lectures / office hours / tutorials. Events that are tests (e.g. 'Midterm (EX100)') are kept."""
+    return kind == "event" and bool(NOISE_EVENTS.search(title or "")) and not is_test(title, kind)
 
 
 # ---------------------------------------------------------------- Quercus
@@ -64,7 +88,7 @@ def fetch_courses(cv: Canvas) -> dict:
         out[str(c["id"])] = {
             "code": code,
             "name": c.get("name") or code,
-            "color": colors.get(f"course_{c['id']}") or PALETTE[i % len(PALETTE)],
+            "color": readable(colors.get(f"course_{c['id']}") or PALETTE[i % len(PALETTE)]),
         }
     return out
 
@@ -81,6 +105,8 @@ def normalize_planner_item(p: dict, cv: Canvas, courses: dict) -> dict | None:
     override = p.get("planner_override") or {}
     title = pl.get("title") or pl.get("name") or "Untitled"
     kind = KIND_BY_TYPE.get(ptype, ptype or "item")
+    if is_noise_event(title, kind):
+        return None
     course_id = str(p.get("course_id") or "")
     if course_id and course_id not in courses:
         courses[course_id] = {"code": short_code(p.get("context_name")),
@@ -137,7 +163,11 @@ def merge_syllabus(items: list, syllabus: list, courses: dict, start: datetime, 
         due = parse_dt(s["due"])
         if not (start <= due <= end):
             continue
-        course = str(s.get("course") or "") or None
+        course = str(s.get("course") or "") or "school"
+        if course == "school" and "school" not in courses:
+            host = config.base_url()
+            courses["school"] = {"code": "UofT" if "utoronto" in host else "School",
+                                 "name": "School-wide dates", "color": "#8892A6"}
         dup = False
         for q in items:
             if q["course"] != course:

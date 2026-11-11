@@ -90,6 +90,9 @@ let feed = null;
 let filter = store.get(KEY_FILTER) || "todo";
 const localDone = new Set(JSON.parse(store.get(KEY_DONE) || "[]"));
 const isDone = (i) => i.done || localDone.has(i.id);
+// Past-due items only count as late when Quercus marks them missing (many courses submit on
+// Gradescope/MarkUs/paper, which Quercus never sees). Otherwise they quietly drop off once due.
+const isGone = (i, now) => new Date(i.due) < now && !i.missing && !isDone(i);
 
 function toggleDone(id) {
   localDone.has(id) ? localDone.delete(id) : localDone.add(id);
@@ -104,7 +107,7 @@ function itemHTML(i, now) {
   const c = feed.courses[i.course] || { code: "", color: "#8892A6" };
   const due = new Date(i.due);
   const done = isDone(i);
-  const overdue = !done && due < now;
+  const overdue = !done && due < now && i.missing;
   const soon = !done && !overdue && due - now < 2 * DAY;
   const badges = [
     i.test && `<span class="badge test">Test</span>`,
@@ -129,7 +132,7 @@ function itemHTML(i, now) {
 function render() {
   const now = new Date();
   const items = feed.items.map((i) => ({ ...i, _d: new Date(i.due) }));
-  const open = items.filter((i) => !isDone(i));
+  const open = items.filter((i) => !isDone(i) && !isGone(i, now));
   const weekEnd = new Date(startOfDay(now).getTime() + 7 * DAY);
 
   // Next up: earliest not-done, not-overdue item
@@ -147,7 +150,7 @@ function render() {
   }
 
   const thisWeek = open.filter((i) => i._d >= now && i._d < weekEnd);
-  const overdue = open.filter((i) => i._d < now);
+  const overdue = open.filter((i) => i._d < now);  // = missing ones
   $("#stats").innerHTML = [
     [thisWeek.length, "due in 7 days"],
     [thisWeek.filter((i) => i.test).length, "tests in 7 days"],
@@ -156,9 +159,9 @@ function render() {
 
   document.querySelectorAll(".chip").forEach((b) => b.classList.toggle("active", b.dataset.filter === filter));
 
-  let shown = items;
-  if (filter === "todo") shown = items.filter((i) => !isDone(i));
-  if (filter === "tests") shown = items.filter((i) => i.test);
+  let shown = items.filter((i) => !(isGone(i, now) && i._d < startOfDay(now)));
+  if (filter === "todo") shown = shown.filter((i) => !isDone(i) && !isGone(i, now));
+  if (filter === "tests") shown = shown.filter((i) => i.test);
   // Hide old finished stuff; keep overdue-but-not-done visible
   shown = shown.filter((i) => i._d >= startOfDay(now) || !isDone(i));
 

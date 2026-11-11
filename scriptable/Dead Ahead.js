@@ -31,24 +31,25 @@ const DAY = 864e5;
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const dayDiff = (a, b) => Math.round((startOfDay(a) - startOfDay(b)) / DAY);
 
-function openItems(feed) {
-  return feed.items.filter((i) => !i.done).map((i) => ({ ...i, _d: new Date(i.due) }));
+function openItems(feed, now = new Date()) {
+  // Past items only stay (as late) if Quercus marks them missing; Gradescope/MarkUs work drops off once due.
+  return feed.items.map((i) => ({ ...i, _d: new Date(i.due) })).filter((i) => !i.done && (i._d >= now || i.missing));
 }
 
 /** Widget: unfinished work (not events) that's overdue or due within URGENT_DAYS. */
 function pickUrgent(feed, now = new Date()) {
-  const until = new Date(now.getTime() + URGENT_DAYS * DAY);
-  return openItems(feed)
-    .filter((i) => (URGENT_KINDS.has(i.kind) || i.test) && i._d <= until && now - i._d < 3 * DAY)
+  const until = new Date(startOfDay(now).getTime() + URGENT_DAYS * DAY);
+  return openItems(feed, now)
+    .filter((i) => (URGENT_KINDS.has(i.kind) || i.test) && i._d < until)
     .sort((a, b) => a._d - b._d);
 }
 
 /** Wallpaper: everything (tests, events, syllabus dates) for the next WALL_DAYS, plus overdue. */
 function pickWeek(feed, now = new Date()) {
   const end = new Date(startOfDay(now).getTime() + WALL_DAYS * DAY);
-  const items = openItems(feed).filter((i) => i._d < end && now - i._d < 3 * DAY);
-  const overdue = items.filter((i) => i._d < now && i.source !== "syllabus" && i.kind !== "event");
-  const upcoming = items.filter((i) => i._d >= startOfDay(now) && !overdue.includes(i));
+  const items = openItems(feed, now).filter((i) => i._d < end);
+  const overdue = items.filter((i) => i._d < now);
+  const upcoming = items.filter((i) => i._d >= now);
   const days = [];
   for (let k = 0; k < WALL_DAYS; k++) {
     const day = new Date(startOfDay(now).getTime() + k * DAY);

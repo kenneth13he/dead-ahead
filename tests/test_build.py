@@ -47,6 +47,30 @@ class PlannerTest(unittest.TestCase):
         self.assertTrue(q["test"])
 
 
+class ClassifyTest(unittest.TestCase):
+    def test_tests_vs_quizzes(self):
+        for title in ["Midterm 2", "Term Test 1", "Final Exam", "MAT137 TT2"]:
+            self.assertTrue(build.is_test(title, "assignment"), title)
+        for title in ["Pre-Class Quiz 24(4.12)", "Week 10 Comprehension Quiz",
+                      "MAT148 Post-Test 1 Survey(This is your test 1 reflection)", "Problemset G",
+                      "TT2 remark request"]:
+            self.assertFalse(build.is_test(title, "quiz"), title)
+
+    def test_lectures_and_office_hours_are_noise(self):
+        for title in ["CSC110 Lecture (LEC0101)", "CSC110 Instructor Office Hours with X",
+                      "CSC110 TA Office Hour with Y - IN PERSON", "MAT223 Tutorial TUT0101"]:
+            self.assertTrue(build.is_noise_event(title, "event"), title)
+        self.assertFalse(build.is_noise_event("CSC110 Midterm (EX100)", "event"))
+        self.assertFalse(build.is_noise_event("Assignment 3", "assignment"))
+
+
+class ColorTest(unittest.TestCase):
+    def test_dark_colours_get_brighter_bright_ones_stay(self):
+        self.assertNotEqual(build.readable("#2E5E3B"), "#2E5E3B")
+        self.assertEqual(build.readable("#4F8EF7"), "#4F8EF7")
+        self.assertEqual(build.readable("not-a-colour"), "#8892A6")
+
+
 class SyllabusMergeTest(unittest.TestCase):
     def test_dedupes_items_quercus_already_has(self):
         now = datetime(2026, 11, 10, tzinfo=timezone.utc)

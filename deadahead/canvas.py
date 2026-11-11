@@ -1,11 +1,18 @@
 """Tiny Canvas LMS REST client (standard library only)."""
 import json
 import re
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 
 USER_AGENT = "DeadAhead/1.0 (+self-hosted deadline viewer)"
+
+try:  # python.org builds on macOS ship without CA certificates; certifi fixes that everywhere
+    import certifi
+    _SSL = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL = ssl.create_default_context()
 
 
 class CanvasError(RuntimeError):
@@ -24,7 +31,7 @@ class Canvas:
             "User-Agent": USER_AGENT,
         })
         try:
-            resp = urllib.request.urlopen(req, timeout=60)
+            resp = urllib.request.urlopen(req, timeout=60, context=_SSL)
         except urllib.error.HTTPError as e:
             if e.code == 401:
                 raise CanvasError("Canvas rejected the token (401). It may be expired or revoked.") from None
