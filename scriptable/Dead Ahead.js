@@ -256,12 +256,14 @@ function buildWidget(feed, family, siteUrl, now = new Date()) {
 const fm = () => FileManager.local();
 const cachePath = () => fm().joinPath(fm().documentsDirectory(), "dead-ahead-cache.json");
 
-async function decryptInWebView(blob, pass) {
-  // Uses the iPhone's built-in WebCrypto (same code as the web app).
+async function decryptInWebView(blob, pass, pageUrl) {
+  // Uses the iPhone's built-in WebCrypto (same code as the web app). WebCrypto only exists on a real https page,
+  // so we open the feed URL itself in a hidden WebView and decrypt there.
   const wv = new WebView();
-  await wv.loadHTML("<html><body></body></html>", "https://dead-ahead.local/");
+  await wv.loadURL(pageUrl);
   const js = `(async () => {
     try {
+      if (!window.crypto || !crypto.subtle) throw new Error("WebCrypto not available (isSecureContext=" + window.isSecureContext + ")");
       const blob = ${JSON.stringify(blob)}, pass = ${JSON.stringify(pass)};
       const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
       const enc = new TextEncoder();
@@ -279,16 +281,21 @@ async function decryptInWebView(blob, pass) {
   return JSON.parse(out);
 }
 
-async function getFeed() {
+async function getFeed(strict = false) {
   if (!Keychain.contains(KC_URL) || !Keychain.contains(KC_PASS)) return null;
   const site = Keychain.get(KC_URL);
   try {
-    const req = new Request(`${site.replace(/\/$/, "")}/feed.enc.json?t=${Date.now()}`);
+    const url = `${site.replace(/\/+$/, "")}/feed.enc.json`;
+    const req = new Request(`${url}?t=${Date.now()}`);
     req.timeoutInterval = 20;
-    const feed = await decryptInWebView(await req.loadJSON(), Keychain.get(KC_PASS));
+    let blob;
+    try { blob = await req.loadJSON(); } catch (e) { throw new Error(`Couldn't download ${url} (${e.message})`); }
+    if (!blob || !blob.ct) throw new Error(`No feed at ${url}. Check the site link.`);
+    const feed = await decryptInWebView(blob, Keychain.get(KC_PASS), url);
     fm().writeString(cachePath(), JSON.stringify(feed));
     return feed;
   } catch (e) {
+    if (strict) throw e;
     console.warn(`Using cached copy: ${e.message}`);
     if (fm().fileExists(cachePath())) return JSON.parse(fm().readString(cachePath()));
     if (String(e.message).includes("Wrong passcode")) throw e;
@@ -312,11 +319,11 @@ async function setup() {
   }
   Keychain.set(KC_URL, site); Keychain.set(KC_PASS, pass);
   try {
-    const feed = await getFeed();
+    const feed = await getFeed(true);
     const ok = new Alert(); ok.title = "✓ Connected"; ok.message = `${feed.items.length} deadlines loaded.`; ok.addAction("Nice"); await ok.present();
     return true;
   } catch (e) {
-    Keychain.remove(KC_PASS);
+    if (String(e.message).includes("Wrong passcode")) Keychain.remove(KC_PASS);
     const bad = new Alert(); bad.title = "Couldn't unlock"; bad.message = e.message; bad.addAction("OK"); await bad.present();
     return false;
   }
