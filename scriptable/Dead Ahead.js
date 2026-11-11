@@ -339,8 +339,10 @@ async function setup() {
 function backgroundImage() {
   const f = fm(), p = f.joinPath(f.documentsDirectory(), BG_FILE);
   if (f.fileExists(p)) return Image.fromFile(p);
-  const ic = FileManager.iCloud(), q = ic.joinPath(ic.documentsDirectory(), BG_FILE);
-  if (ic.fileExists(q)) { return Image.fromFile(q); }
+  try { // iCloud is optional: FileManager.iCloud() throws when Scriptable isn't using iCloud Drive
+    const ic = FileManager.iCloud(), q = ic.joinPath(ic.documentsDirectory(), BG_FILE);
+    if (ic.fileExists(q)) return Image.fromFile(q);
+  } catch (e) { /* no iCloud: no custom background */ }
   return null;
 }
 
